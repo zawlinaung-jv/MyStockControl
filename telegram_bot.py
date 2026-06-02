@@ -6,8 +6,9 @@ import threading
 from inventory_skill import process_message, get_stock_report
 
 # CRITICAL FOR RAILWAY: Token များကို Environment Variables မှ တိုက်ရိုက်ဖတ်စေခြင်း
-BOT_TOKEN = os.environ.get("8977520767:AAGpWu7fIX8eeDFElKeb_v4XFpwR3auYqQk")
-REPORT_CHAT_ID = os.environ.get("5313885539")
+# telegram_bot.py ထဲက အဟောင်းကို ဖျက်ပြီး ဒါနဲ့ အစားထိုးပါ-
+BOT_TOKEN = "8977520767:AAGpWu7fIX8eeDFElKeb_v4XFpwR3auYqQk"
+REPORT_CHAT_ID = "5313885539"  # ဥပမာ -100xxx သို့မဟုတ် အမှန်တကယ် ID
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
