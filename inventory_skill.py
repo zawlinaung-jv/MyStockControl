@@ -3,11 +3,10 @@ import json
 from datetime import datetime, timedelta
 import re
 
-# CRITICAL FOR RAILWAY: Railway Persistent Volume Storage Path
+# CRITICAL FOR RAILWAY: Persistent Volume Storage Path
 DB_PATH = "/app/data/sales_data.json"
 
 def init_db():
-    """Initializes the structural database schema if the file doesn't exist."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     if not os.path.exists(DB_PATH):
         initial_data = {"products": {}, "customers": {}, "transactions": []}
@@ -24,7 +23,6 @@ def write_db(data):
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 def get_yangon_time():
-    """Calculates current timestamp in Yangon Time (UTC +6:30)."""
     return (datetime.utcnow() + timedelta(hours=6, minutes=30)).strftime('%Y-%m-%d %H:%M:%S')
 
 def add_new_customer(customer_name):
@@ -34,7 +32,7 @@ def add_new_customer(customer_name):
         return f"⚠️ Warning: Customer '{c_name}' already exists!"
     data["customers"][c_name] = {"total_balance": 0}
     write_db(data)
-    return f"👤 [NEW CUSTOMER REGISTERED]\n----------------------------------\n🏢 Name: {c_name}\n💰 Current Balance: 0 ks"
+    return f"👤 [NEW CUSTOMER REGISTERED]\n----------------------------------\nName: {c_name}\nCurrent Balance: 0 ks"
 
 def build_single_customer_profile(data, c_name):
     balance = data["customers"][c_name]["total_balance"]
@@ -92,13 +90,13 @@ def check_customer_balance(customer_name):
     data = read_db()
     c_name = customer_name.strip().upper()
     if c_name not in data["customers"]:
-        return f"❌ Error: Customer '{c_name}' not found in database!"
+        return f"❌ Error: Customer '{c_name}' not found!"
     return build_single_customer_profile(data, c_name)
 
 def get_all_customers_report():
     data = read_db()
     if not data["customers"]:
-        return {"type": "MULTI_MSG", "data": ["👥 [CUSTOMERS DATABASE]\n----------------------------------\n⚠️ No registered customers found."]}
+        return {"type": "MULTI_MSG", "data": ["👥 [CUSTOMERS DATABASE MASTER]\n----------------------------------\n⚠️ No registered customers found."]}
     output_messages = []
     for c_name in sorted(data["customers"].keys()):
         output_messages.append(build_single_customer_profile(data, c_name))
@@ -193,7 +191,7 @@ def get_stock_report():
     
     stock_report_text = (
         f"📊 [EXECUTIVE INVENTORY REPORT]\n"
-        f"📅 Generated At: {timestamp} (Yangon Time)\n"
+        f"📅 Generated At: {timestamp}\n"
         f"----------------------------------\n\n"
         f"📦 [CURRENT INVENTORY STOCK]\n"
         f"----------------------------------\n"
@@ -208,29 +206,21 @@ def get_stock_report():
             sale_price = info['sale_price']
             
             stock_report_text += f"▪️ {p_name} -> Stock: {stk_qty} pcs | Price: {sale_price:,} ks\n"
-            
-            # 1. Total Stock Balance (Asset Value Based on Purchase Price)
             total_stock_balance += (stk_qty * pur_price)
 
-    # Calculate exact financials from sales transactions
     for tx in data["transactions"]:
         if tx["type"] == "SALE":
             qty = tx["qty"]
             sale_price = tx["price"]
             p_name = tx["product"]
             
-            # 2. Total Sales
             total_sales += (qty * sale_price)
-            # 3. Total Volumes
             total_volumes += qty
             
-            # COGS calculation based on dynamic product purchase cost
             pur_price = data["products"].get(p_name, {}).get("pur_price", 0)
             total_cost_of_goods_sold += (qty * pur_price)
 
-    # 4. Total GP (Gross Profit = Total Revenue - Total Cost)
     total_gp = total_sales - total_cost_of_goods_sold
-    # 5. Total PNL (Net Profit & Loss Statement)
     total_pnl = total_gp
 
     metrics_board = (
@@ -249,28 +239,20 @@ def process_message(message_text):
     cleaned_text = re.sub(r'(?<=\d)(pcs|pc|ks|ks\.)', '', message_text, flags=re.IGNORECASE)
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
 
-    # Database clear & reset safety routes
-    if cleaned_text.lower() in ["clear", "/clear", "all clear", "reset"]:
-        return (
-            "⚠️ [SAFETY CHECK: DATABASE CLEAR REQUEST]\n"
-            "Are you sure you want to delete data? Please type one of these explicit commands:\n\n"
-            "🔄 Options:\n"
-            "• `/clear_customer` -> Wipe all customer profiles.\n"
-            "• `/clear_stock`    -> Wipe all inventory and stock items.\n"
-            "• `/clear_sales`    -> Wipe all transaction history logs.\n"
-            "• `/clear_all`      -> Factory Reset the entire database."
-        )
+    # CRITICAL: Implemented immediate clear executions without nesting blockers
+    if cleaned_text.lower() in ["clear all", "/clear_all", "clear_all"]:
+        write_db({"products": {}, "customers": {}, "transactions": []})
+        return "🚨 [DATABASE FACTORY RESET] Entire system database has been wiped clean successfully!"
 
-    if cleaned_text.lower() == "/clear_customer":
-        data = read_db(); data["customers"] = {}; write_db(data); return "✅ Success: All customer profiles have been wiped clean."
-    if cleaned_text.lower() == "/clear_stock":
-        data = read_db(); data["products"] = {}; write_db(data); return "✅ Success: All inventory products have been wiped clean."
-    if cleaned_text.lower() == "/clear_sales":
-        data = read_db(); data["transactions"] = []; write_db(data); return "✅ Success: All transaction logs have been wiped clean."
-    if cleaned_text.lower() == "/clear_all":
-        write_db({"products": {}, "customers": {}, "transactions": []}); return "🚨 Entire system factory reset successful. All data permanently deleted."
+    if cleaned_text.lower() in ["clear stock", "/clear_stock", "clear_stock"]:
+        data = read_db(); data["products"] = {}; write_db(data)
+        return "✅ [STOCK RESET] All inventory stock products have been wiped clean."
 
-    # Stock quantity modification control route
+    if cleaned_text.lower() in ["clear customer", "/clear_customer", "clear_customer"]:
+        data = read_db(); data["customers"] = {}; write_db(data)
+        return "✅ [CUSTOMER RESET] All customer profiles have been wiped clean."
+
+    # Stock quantity level explicit modifications
     update_stk_match = re.match(r"^/update_stock\s+([a-zA-Z0-9_-]+)\s+(\d+)", cleaned_text, re.IGNORECASE)
     if update_stk_match:
         data = read_db()
@@ -282,7 +264,7 @@ def process_message(message_text):
             return f"🔧 [Stock Updated] '{p_name}' stock quantity has been explicitly set to {new_qty} pcs."
         return f"❌ Error: Product '{p_name}' not found."
 
-    # Total product purging removal route
+    # Complete product structural purging
     del_prod_match = re.match(r"^/delete_product\s+([a-zA-Z0-9_-]+)", cleaned_text, re.IGNORECASE)
     if del_prod_match:
         data = read_db()
@@ -293,6 +275,11 @@ def process_message(message_text):
             return f"🗑️ [Product Deleted] '{p_name}' has been completely removed from the database."
         return f"❌ Error: Product '{p_name}' not found."
 
+    # Inbound /purchase router
+    buy_match = re.match(r"^/(purchase|buy)\s+([a-zA-Z0-9_-]+)\s+(\d+)\s+(\d+)\s+(\d+)", cleaned_text, re.IGNORECASE)
+    if buy_match: return purchase_product(buy_match.group(2), int(buy_match.group(3)), int(buy_match.group(4)), int(buy_match.group(5)))
+
+    # Customer registration & tracking
     add_cust_match = re.match(r"^/addcustomer\s+(.+)$", cleaned_text, re.IGNORECASE)
     if add_cust_match: return add_new_customer(add_cust_match.group(1))
         
@@ -301,14 +288,10 @@ def process_message(message_text):
 
     if cleaned_text.lower() in ["/allcustomers", "all customer", "all customers", "customers"]:
         return get_all_customers_report()
-
-    # /purchase or /buy command routers
-    buy_match = re.match(r"^/(purchase|buy)\s+([a-zA-Z0-9_-]+)\s+(\d+)\s+(\d+)\s+(\d+)", cleaned_text, re.IGNORECASE)
-    if buy_match: return purchase_product(buy_match.group(2), int(buy_match.group(3)), int(buy_match.group(4)), int(buy_match.group(5)))
         
     if cleaned_text.lower() in ["/report", "report", "stock", "summary", "/summary"]: return get_stock_report()
         
-    # Multi-product sales parser engine
+    # Multi-item Sales parser engine
     tokens = cleaned_text.split(" ")
     if len(tokens) >= 3:
         possible_remark = tokens[-1].upper()
