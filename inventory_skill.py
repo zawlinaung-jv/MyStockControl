@@ -79,7 +79,7 @@ def build_single_customer_profile(data, c_name):
         f"----------------------------------\n"
     )
     
-    # --- PRODUCT အလိုက် HISTORY ကို တစ်ကြောင်းတည်း ပေါင်းစည်းခြင်း ---
+    # PRODUCT အလိုက် HISTORY ကို တစ်ကြောင်းတည်း စုပေါင်းခြင်း
     history_grouped = {}
     for tx in matched_txs:
         p_name = tx["product"]
@@ -87,7 +87,6 @@ def build_single_customer_profile(data, c_name):
         price = tx["price"]
         remark = tx.get("remark", "UNPAID").strip().upper()
         
-        # ရက်စွဲမခွဲဘဲ Product နှင့် Status တူလျှင် ဒေတာပေါင်းမည်
         group_key = (p_name, remark)
         
         if group_key not in history_grouped:
@@ -99,7 +98,7 @@ def build_single_customer_profile(data, c_name):
             
         history_grouped[group_key]["total_qty"] += qty
         history_grouped[group_key]["total_price"] += (qty * price)
-        history_grouped[group_key]["last_timestamp"] = tx["timestamp"] # နောက်ဆုံးဝယ်ခဲ့သည့်အချိန်ကို ပြရန်
+        history_grouped[group_key]["last_timestamp"] = tx["timestamp"]
 
     sales_found = False
     for (p_name, remark), info in reversed(list(history_grouped.items())):
@@ -230,7 +229,6 @@ def update_transaction_status(customer_name, target_time, new_status):
         return f"❌ Error: {c_name} ၏ စာရင်းထဲတွင် ပေးထားသော ရက်စွဲ/အချိန် '{t_time}' နှင့် ကိုက်ညီမှု မရှိပါ။"
 
 def delete_single_customer(customer_name):
-    """Customer တစ်ယောက်ချင်းစီ၏ ဒေတာအားလုံးကို Wipe ရှင်းလင်းရန်"""
     data = read_db()
     c_name = customer_name.strip().upper()
     
@@ -302,6 +300,12 @@ def process_message(message_text):
     cleaned_text = re.sub(r'(?<=\d)(pcs|pc|ks|ks\.)', '', message_text, flags=re.IGNORECASE)
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
 
+    # CRITICAL FIX: Single Customer Clear Match ကို အပေါ်ဆုံးမှာ အရင်စစ်ရမည်!
+    clear_cust_match = re.match(r"^/clear_customer\s+(.+)$", cleaned_text, re.IGNORECASE)
+    if clear_cust_match:
+        return delete_single_customer(clear_cust_match.group(1))
+
+    # Master Reset Routines
     if cleaned_text.lower() in ["clear all", "/clear_all", "clear_all"]:
         write_db({"products": {}, "customers": {}, "transactions": []})
         return "🚨 [DATABASE FACTORY RESET] Entire system database has been wiped clean successfully!"
@@ -309,11 +313,6 @@ def process_message(message_text):
     if cleaned_text.lower() in ["clear stock", "/clear_stock", "clear_stock"]:
         data = read_db(); data["products"] = {}; write_db(data)
         return "✅ [STOCK RESET] All inventory stock products have been wiped clean."
-
-    # Single Customer Clear Router
-    clear_cust_match = re.match(r"^/clear_customer\s+(.+)$", cleaned_text, re.IGNORECASE)
-    if clear_cust_match:
-        return delete_single_customer(clear_cust_match.group(1))
 
     if cleaned_text.lower() in ["clear customer", "/clear_customer", "clear_customer"]:
         data = read_db(); data["customers"] = {}; write_db(data)
