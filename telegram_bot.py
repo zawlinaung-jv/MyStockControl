@@ -5,14 +5,16 @@ import time
 import threading
 from inventory_skill import process_message, get_stock_report
 
-# CRITICAL FOR RAILWAY: Token များကို Environment Variables မှ တိုက်ရိုက်ဖတ်စေခြင်း
-# telegram_bot.py ထဲက အဟောင်းကို ဖျက်ပြီး ဒါနဲ့ အစားထိုးပါ-
-BOT_TOKEN = "8977520767:AAGpWu7fIX8eeDFElKeb_v4XFpwR3auYqQk"
-REPORT_CHAT_ID = "5313885539"  # ဥပမာ -100xxx သို့မဟုတ် အမှန်တကယ် ID
+# Railway Config Environment Variables (ရှာမတွေ့ပါက ပေးထားသော Token ကို Default သုံးမည်)
+env_token = os.getenv("BOT_TOKEN")
+BOT_TOKEN = env_token if env_token and env_token.strip() else "8977520767:AAGpWu7fIX8eeDFElKeb_v4XFpwR3auYqQk"
+
+env_chat_id = os.getenv("REPORT_CHAT_ID")
+REPORT_CHAT_ID = env_chat_id if env_chat_id and env_chat_id.strip() else "5313885539"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-print("🚀 Railway Anti-Overflow Bot Engine Running...")
+print(f"🚀 Railway Bot Engine Running Server-Side Mode...")
 
 @bot.message_handler(func=lambda message: True)
 def handle_telegram_message(message):
@@ -29,13 +31,19 @@ def handle_telegram_message(message):
             bot.reply_to(message, reply_output)
     else:
         help_text = (
-            "💡 Available Action Syntaxes -\n"
-            "1️⃣ Register Customer: `/addcustomer [Customer_Name]`\n"
-            "2️⃣ Balance Ledger Lookup: `/customer [Customer_Name]`\n"
-            "3️⃣ All Customer Profiles: Send `all customer`\n"
-            "4️⃣ Inbound Stock Entry: `/buy [Product] [Qty] [Cost] [Retail]`\n"
-            "5️⃣ Record Sale: `[Customer_Name] [Product] [Qty] [Remark]`\n"
-            "6️⃣ Report: Send `summary` or `report`"
+            f"💡 [AVAILABLE ACTION SYNTAXES]\n"
+            f"----------------------------------\n"
+            f"1️⃣ Register Customer: `/addcustomer [Customer_Name]`\n"
+            f"2️⃣ Balance Ledger Lookup: `/customer [Customer_Name]`\n"
+            f"3️⃣ All Customer Profiles: Send `all customer`\n"
+            f"4️⃣ Inbound Stock Entry: `/buy [Product] [Qty] [Cost] [Retail]`\n"
+            f"5️⃣ Record Sale: `[Customer_Name] [Product] [Qty] [Remark]`\n"
+            f"6️⃣ Report Summary: Send `summary` or `report`\n"
+            f"7️⃣ Update Stock Level: `/update_stock [Product] [NewQty]`\n"
+            f"8️⃣ Delete Product: `/delete_product [Product]`\n"
+            f"9️⃣ Change Bill Status: `/update_status [Customer_Name] | [Timestamp] | [PAID/UNPAID]`\n"
+            f"🔟 Single Customer Wipe: `/clear_customer [Customer_Name]`\n"
+            f"⚠️ Master Wiping: `clear all` | `clear stock` | `clear customer`"
         )
         bot.reply_to(message, help_text)
 
@@ -47,6 +55,7 @@ def send_automated_report():
         print(f"CRITICAL: Failed to broadcast report: {e}")
 
 def run_schedule():
+    # UTC 01:30 is Myanmar Standard Time (MMT) 08:00 AM
     schedule.every().day.at("01:30").do(send_automated_report)
     while True:
         schedule.run_pending()
@@ -56,4 +65,4 @@ if BOT_TOKEN:
     threading.Thread(target=run_schedule, daemon=True).start()
     bot.infinity_polling()
 else:
-    print("❌ ERROR: BOT_TOKEN variable is missing in Railway Settings!")
+    print("❌ ERROR: BOT_TOKEN variable is missing entirely!")

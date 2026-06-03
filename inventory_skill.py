@@ -34,8 +34,17 @@ def add_new_customer(customer_name):
     write_db(data)
     return f"👤 [NEW CUSTOMER REGISTERED]\n----------------------------------\nName: {c_name}\nCurrent Balance: 0 ks"
 
+def recalculate_customer_balance(data, c_name):
+    total_debt = 0
+    for tx in data.get("transactions", []):
+        if tx["type"] == "SALE" and tx.get("customer", "").upper() == c_name:
+            remark = tx.get("remark", "UNPAID").strip().upper()
+            if remark in ["UNPAID", "NOT-PAID", "NOT_PAID"]:
+                total_debt += (tx["qty"] * tx["price"])
+    return total_debt
+
 def build_single_customer_profile(data, c_name):
-    balance = data["customers"][c_name]["total_balance"]
+    balance = recalculate_customer_balance(data, c_name)
     customer_items = {}
     invoice_details = ""
     total_qty = 0
@@ -66,20 +75,40 @@ def build_single_customer_profile(data, c_name):
         f"{invoice_details.strip()}\n"
         f"🧮 Total Quantity: {total_qty} pcs\n"
         f"🔺 Total Debt Balance: {balance:,} ks\n\n"
-        f"🕒 [TRANSACTION HISTORY]\n"
+        f"🕒 [TRANSACTION HISTORY (TOTALED BY PRODUCT)]\n"
         f"----------------------------------\n"
     )
     
-    sales_found = False
-    for tx in reversed(matched_txs):
-        sales_found = True
-        tx_time = tx["timestamp"]
+    # --- PRODUCT အလိုက် HISTORY ကို တစ်ကြောင်းတည်း ပေါင်းစည်းခြင်း ---
+    history_grouped = {}
+    for tx in matched_txs:
         p_name = tx["product"]
         qty = tx["qty"]
-        line_total = tx['qty'] * tx['price']
-        remark = tx.get("remark", "UNPAID")
+        price = tx["price"]
+        remark = tx.get("remark", "UNPAID").strip().upper()
         
-        profile_block += f"📆 {tx_time} | {p_name} ({qty}pcs) = {line_total:,} ks [{remark}]\n"
+        # ရက်စွဲမခွဲဘဲ Product နှင့် Status တူလျှင် ဒေတာပေါင်းမည်
+        group_key = (p_name, remark)
+        
+        if group_key not in history_grouped:
+            history_grouped[group_key] = {
+                "total_qty": 0,
+                "total_price": 0,
+                "last_timestamp": tx["timestamp"]
+            }
+            
+        history_grouped[group_key]["total_qty"] += qty
+        history_grouped[group_key]["total_price"] += (qty * price)
+        history_grouped[group_key]["last_timestamp"] = tx["timestamp"] # နောက်ဆုံးဝယ်ခဲ့သည့်အချိန်ကို ပြရန်
+
+    sales_found = False
+    for (p_name, remark), info in reversed(list(history_grouped.items())):
+        sales_found = True
+        tx_time = info["last_timestamp"]
+        g_qty = info["total_qty"]
+        g_total = info["total_price"]
+        
+        profile_block += f"📆 {tx_time} | {p_name} ({g_qty}pcs) = {g_total:,} ks [{remark}]\n"
         
     if not sales_found:
         profile_block += f"ℹ️ No transaction history found for this customer.\n"
@@ -162,7 +191,7 @@ def sell_multi_products(customer_name, items_list, remark_val="UNPAID"):
             "type": "SALE", "customer": c_name, "product": p_name, "qty": qty_val, "price": sale_price, "timestamp": timestamp, "remark": remark_upper
         })
         
-    data["customers"][c_name]["total_balance"] += voucher_total_balance
+    data["customers"][c_name]["total_balance"] = recalculate_customer_balance(data, c_name)
     write_db(data)
     
     products_inline = ", ".join(detailed_product_summary)
@@ -179,6 +208,40 @@ def sell_multi_products(customer_name, items_list, remark_val="UNPAID"):
         f"📌 Status: {remark_upper}\n"
         f"----------------------------------"
     )
+
+def update_transaction_status(customer_name, target_time, new_status):
+    data = read_db()
+    c_name = customer_name.strip().upper()
+    t_time = target_time.strip()
+    status_upper = new_status.strip().upper()
+    
+    found = False
+    for tx in data.get("transactions", []):
+        if tx["type"] == "SALE" and tx.get("customer", "").upper() == c_name and tx.get("timestamp", "") == t_time:
+            tx["remark"] = status_upper
+            found = True
+            
+    if found:
+        if c_name in data["customers"]:
+            data["customers"][c_name]["total_balance"] = recalculate_customer_balance(data, c_name)
+        write_db(data)
+        return f"✅ [STATUS UPDATED] {c_name} ၏ {t_time} စာရင်းအား '{status_upper}' သို့ အောင်မြင်စွာ ပြောင်းလဲပြီးပါပြီ။"
+    else:
+        return f"❌ Error: {c_name} ၏ စာရင်းထဲတွင် ပေးထားသော ရက်စွဲ/အချိန် '{t_time}' နှင့် ကိုက်ညီမှု မရှိပါ။"
+
+def delete_single_customer(customer_name):
+    """Customer တစ်ယောက်ချင်းစီ၏ ဒေတာအားလုံးကို Wipe ရှင်းလင်းရန်"""
+    data = read_db()
+    c_name = customer_name.strip().upper()
+    
+    if c_name not in data["customers"]:
+        return f"❌ Error: Customer '{c_name}' ကို ရှာမတွေ့ပါ။"
+        
+    del data["customers"][c_name]
+    data["transactions"] = [tx for tx in data["transactions"] if not (tx["type"] == "SALE" and tx.get("customer", "").upper() == c_name)]
+    
+    write_db(data)
+    return f"🗑️ [CUSTOMER PURGED] Customer '{c_name}' နှင့် ၎င်း၏ အရောင်းမှတ်တမ်း ရာဇဝင်အားလုံးကို အောင်မြင်စွာ ဖျက်သိမ်းပြီးပါပြီ။"
 
 def get_stock_report():
     data = read_db()
@@ -239,7 +302,6 @@ def process_message(message_text):
     cleaned_text = re.sub(r'(?<=\d)(pcs|pc|ks|ks\.)', '', message_text, flags=re.IGNORECASE)
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
 
-    # CRITICAL: Implemented immediate clear executions without nesting blockers
     if cleaned_text.lower() in ["clear all", "/clear_all", "clear_all"]:
         write_db({"products": {}, "customers": {}, "transactions": []})
         return "🚨 [DATABASE FACTORY RESET] Entire system database has been wiped clean successfully!"
@@ -248,11 +310,21 @@ def process_message(message_text):
         data = read_db(); data["products"] = {}; write_db(data)
         return "✅ [STOCK RESET] All inventory stock products have been wiped clean."
 
+    # Single Customer Clear Router
+    clear_cust_match = re.match(r"^/clear_customer\s+(.+)$", cleaned_text, re.IGNORECASE)
+    if clear_cust_match:
+        return delete_single_customer(clear_cust_match.group(1))
+
     if cleaned_text.lower() in ["clear customer", "/clear_customer", "clear_customer"]:
         data = read_db(); data["customers"] = {}; write_db(data)
         return "✅ [CUSTOMER RESET] All customer profiles have been wiped clean."
 
-    # Stock quantity level explicit modifications
+    # Update Status Engine Parser
+    status_match = re.match(r"^/update_status\s+([^|]+)\|([^|]+)\|(.+)$", cleaned_text, re.IGNORECASE)
+    if status_match:
+        return update_transaction_status(status_match.group(1), status_match.group(2), status_match.group(3))
+
+    # Stock modifications router
     update_stk_match = re.match(r"^/update_stock\s+([a-zA-Z0-9_-]+)\s+(\d+)", cleaned_text, re.IGNORECASE)
     if update_stk_match:
         data = read_db()
@@ -264,7 +336,7 @@ def process_message(message_text):
             return f"🔧 [Stock Updated] '{p_name}' stock quantity has been explicitly set to {new_qty} pcs."
         return f"❌ Error: Product '{p_name}' not found."
 
-    # Complete product structural purging
+    # Delete single product routing
     del_prod_match = re.match(r"^/delete_product\s+([a-zA-Z0-9_-]+)", cleaned_text, re.IGNORECASE)
     if del_prod_match:
         data = read_db()
@@ -275,11 +347,11 @@ def process_message(message_text):
             return f"🗑️ [Product Deleted] '{p_name}' has been completely removed from the database."
         return f"❌ Error: Product '{p_name}' not found."
 
-    # Inbound /purchase router
+    # Inbound stock parsing router
     buy_match = re.match(r"^/(purchase|buy)\s+([a-zA-Z0-9_-]+)\s+(\d+)\s+(\d+)\s+(\d+)", cleaned_text, re.IGNORECASE)
     if buy_match: return purchase_product(buy_match.group(2), int(buy_match.group(3)), int(buy_match.group(4)), int(buy_match.group(5)))
 
-    # Customer registration & tracking
+    # Customer profiles tracking routing
     add_cust_match = re.match(r"^/addcustomer\s+(.+)$", cleaned_text, re.IGNORECASE)
     if add_cust_match: return add_new_customer(add_cust_match.group(1))
         
@@ -291,7 +363,7 @@ def process_message(message_text):
         
     if cleaned_text.lower() in ["/report", "report", "stock", "summary", "/summary"]: return get_stock_report()
         
-    # Multi-item Sales parser engine
+    # Multi-product transaction parser engine
     tokens = cleaned_text.split(" ")
     if len(tokens) >= 3:
         possible_remark = tokens[-1].upper()
