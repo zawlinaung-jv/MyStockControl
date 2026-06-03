@@ -43,16 +43,14 @@ def recalculate_customer_balance(data, c_name):
                 total_debt += (tx["qty"] * tx["price"])
     return total_debt
 
-def build_single_customer_profile(data, c_name):
-    balance = recalculate_customer_balance(data, c_name)
+def build_purchase_details_block(data, c_name, balance):
+    """Customer တစ်ယောက်ချင်းစီ၏ စုစုပေါင်း ဝယ်ယူမှုအနှစ်ချုပ် စာသားတုံး ထုတ်ပေးရန်"""
     customer_items = {}
     invoice_details = ""
     total_qty = 0
-    matched_txs = []
     
     for tx in data["transactions"]:
         if tx["type"] == "SALE" and tx.get("customer", "").upper() == c_name:
-            matched_txs.append(tx)
             p_name = tx["product"]
             qty = tx["qty"]
             customer_items[p_name] = customer_items.get(p_name, 0) + qty
@@ -61,6 +59,24 @@ def build_single_customer_profile(data, c_name):
     for p, q in customer_items.items():
         r_price = data["products"].get(p, {}).get("sale_price", 0)
         invoice_details += f"🔹 {p} : {r_price:,} * {q} = {q * r_price:,} ks\n"
+        
+    if not invoice_details:
+        invoice_details = "🔹 No items purchased yet.\n"
+
+    block = (
+        f"📋 [TOTAL PURCHASE DETAILS]\n"
+        f"----------------------------------\n"
+        f"{invoice_details.strip()}\n"
+        f"🧮 Total Quantity: {total_qty} pcs\n"
+        f"🔺 Total Debt Balance: {balance:,} ks"
+    )
+    return block, customer_items
+
+def build_single_customer_profile(data, c_name):
+    balance = recalculate_customer_balance(data, c_name)
+    
+    # စုစုပေါင်း ဝယ်ယူမှုအနှစ်ချုပ် အပိုင်းကို လှမ်းယူသည်
+    purchase_block, customer_items = build_purchase_details_block(data, c_name, balance)
 
     prod_summary_list = [f"{p} (x{q})" for p, q in customer_items.items()]
     products_inline = ", ".join(prod_summary_list) if prod_summary_list else "None"
@@ -70,44 +86,24 @@ def build_single_customer_profile(data, c_name):
         f"----------------------------------\n"
         f"🏢 Name: {c_name}\n"
         f"📦 Purchased Items: {products_inline}\n\n"
-        f"📋 [PURCHASE DETAILS]\n"
-        f"----------------------------------\n"
-        f"{invoice_details.strip()}\n"
-        f"🧮 Total Quantity: {total_qty} pcs\n"
-        f"🔺 Total Debt Balance: {balance:,} ks\n\n"
-        f"🕒 [TRANSACTION HISTORY (TOTALED BY PRODUCT)]\n"
+        f"{purchase_block}\n\n"
+        f"🕒 [TRANSACTION HISTORY]\n"
         f"----------------------------------\n"
     )
     
-    # PRODUCT အလိုက် HISTORY ကို တစ်ကြောင်းတည်း စုပေါင်းခြင်း
-    history_grouped = {}
-    for tx in matched_txs:
-        p_name = tx["product"]
-        qty = tx["qty"]
-        price = tx["price"]
-        remark = tx.get("remark", "UNPAID").strip().upper()
-        
-        group_key = (p_name, remark)
-        
-        if group_key not in history_grouped:
-            history_grouped[group_key] = {
-                "total_qty": 0,
-                "total_price": 0,
-                "last_timestamp": tx["timestamp"]
-            }
-            
-        history_grouped[group_key]["total_qty"] += qty
-        history_grouped[group_key]["total_price"] += (qty * price)
-        history_grouped[group_key]["last_timestamp"] = tx["timestamp"]
-
+    # --- CRITICAL REVERT: TRANSACTION ကို ပေါင်းစည်းခြင်းမလုပ်ဘဲ တစ်ကြောင်းချင်းစီ ပြန်ပြခြင်း ---
     sales_found = False
-    for (p_name, remark), info in reversed(list(history_grouped.items())):
-        sales_found = True
-        tx_time = info["last_timestamp"]
-        g_qty = info["total_qty"]
-        g_total = info["total_price"]
-        
-        profile_block += f"📆 {tx_time} | {p_name} ({g_qty}pcs) = {g_total:,} ks [{remark}]\n"
+    for tx in reversed(data["transactions"]):
+        if tx["type"] == "SALE" and tx.get("customer", "").upper() == c_name:
+            sales_found = True
+            tx_time = tx["timestamp"]
+            p_name = tx["product"]
+            qty = tx["qty"]
+            price = tx["price"]
+            remark = tx.get("remark", "UNPAID").strip().upper()
+            total_cost = qty * price
+            
+            profile_block += f"📆 {tx_time} | {p_name} ({qty}pcs) = {total_cost:,} ks [{remark}]\n"
         
     if not sales_found:
         profile_block += f"ℹ️ No transaction history found for this customer.\n"
@@ -190,10 +186,17 @@ def sell_multi_products(customer_name, items_list, remark_val="UNPAID"):
             "type": "SALE", "customer": c_name, "product": p_name, "qty": qty_val, "price": sale_price, "timestamp": timestamp, "remark": remark_upper
         })
         
-    data["customers"][c_name]["total_balance"] = recalculate_customer_balance(data, c_name)
+    current_balance = recalculate_customer_balance(data, c_name)
+    data["customers"][c_name]["total_balance"] = current_balance
+    
+    # --- စာရင်းသွင်းပြီးတိုင်း စုစုပေါင်း အကြွေးစာရင်းအနှစ်ချုပ် ဘလောက်တုံးကို လှမ်းဆွဲထုတ်ခြင်း ---
+    total_purchase_block, _ = build_purchase_details_block(data, c_name, current_balance)
+    
     write_db(data)
     
     products_inline = ", ".join(detailed_product_summary)
+    
+    # Voucher စာသားအောက်တွင် TOTAL PURCHASE DETAILS ကို တိုက်ရိုက်ဆက်တွဲပြသသည်
     return (
         f"📝 [SALES VOUCHER]\n"
         f"----------------------------------\n"
@@ -205,7 +208,8 @@ def sell_multi_products(customer_name, items_list, remark_val="UNPAID"):
         f"🧮 Total Quantity: {total_qty} pcs\n"
         f"💰 Total Amount: {voucher_total_balance:,} ks\n"
         f"📌 Status: {remark_upper}\n"
-        f"----------------------------------"
+        f"----------------------------------\n\n"
+        f"{total_purchase_block}"
     )
 
 def update_transaction_status(customer_name, target_time, new_status):
@@ -300,7 +304,7 @@ def process_message(message_text):
     cleaned_text = re.sub(r'(?<=\d)(pcs|pc|ks|ks\.)', '', message_text, flags=re.IGNORECASE)
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
 
-    # CRITICAL FIX: Single Customer Clear Match ကို အပေါ်ဆုံးမှာ အရင်စစ်ရမည်!
+    # Single Customer Clear Match 
     clear_cust_match = re.match(r"^/clear_customer\s+(.+)$", cleaned_text, re.IGNORECASE)
     if clear_cust_match:
         return delete_single_customer(clear_cust_match.group(1))
